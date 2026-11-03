@@ -1,5 +1,5 @@
 /* Offline support: keeps the app and its libraries on the phone after the first visit. */
-const VERSION = "ssa-offline-v1";
+const VERSION = "ssa-cloud-v1";
 const CORE = [
   "./",
   "./index.html",
@@ -10,6 +10,7 @@ const CORE = [
   "./apple-touch-icon.png",
   "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js",
   "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js",
+  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js",
 ];
 
 self.addEventListener("install", (event) => {
