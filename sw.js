@@ -1,5 +1,5 @@
 /* Offline support: keeps the app and its libraries on the phone after the first visit. */
-const VERSION = "ssa-cloud-v5";
+const VERSION = "ssa-cloud-v7";
 const CORE = [
   "./",
   "./index.html",
@@ -14,7 +14,8 @@ const CORE = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(VERSION).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
+  // cache: "reload" skips the browser's own HTTP cache, so an update never keeps an old copy.
+  event.waitUntil(caches.open(VERSION).then((c) => c.addAll(CORE.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -31,13 +32,27 @@ self.addEventListener("fetch", (event) => {
   // The app page: try the network for updates, fall back to the saved copy offline.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: "no-cache" })
         .then((res) => {
           const copy = res.clone();
           caches.open(VERSION).then((c) => c.put("./index.html", copy));
           return res;
         })
         .catch(() => caches.match("./index.html").then((r) => r || caches.match("./"))),
+    );
+    return;
+  }
+
+  // The app's name and icon list: newest from the network, saved copy offline.
+  if (url.origin === self.location.origin && url.pathname.endsWith("manifest.webmanifest")) {
+    event.respondWith(
+      fetch(req, { cache: "no-cache" })
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put("./manifest.webmanifest", copy));
+          return res;
+        })
+        .catch(() => caches.match("./manifest.webmanifest")),
     );
     return;
   }
