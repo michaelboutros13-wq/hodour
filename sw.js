@@ -1,5 +1,5 @@
 /* Offline support: keeps the app and its libraries on the phone after the first visit. */
-const VERSION = "ssa-cloud-v13";
+const VERSION = "ssa-cloud-v15";
 const CORE = [
   "./",
   "./index.html",
