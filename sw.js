@@ -1,5 +1,5 @@
-/* Offline support: keeps the app and its libraries on the phone after the first visit. */
-const VERSION = "ssa-cloud-b1afd8337f";
+/* Offline support: keeps the app on the phone after the first visit, so it opens with no internet. */
+const VERSION = "ssa-cloud-830c862dfb";
 const CORE = [
   "./",
   "./index.html",
@@ -8,14 +8,23 @@ const CORE = [
   "./icon-512.png",
   "./icon-maskable-512.png",
   "./apple-touch-icon.png",
-  "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js",
-  "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js",
-  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js",
 ];
 
 self.addEventListener("install", (event) => {
   // cache: "reload" skips the browser's own HTTP cache, so an update never keeps an old copy.
-  event.waitUntil(caches.open(VERSION).then((c) => c.addAll(CORE.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
+  // Each file on its own: one that fails (weak network) doesn't stop the rest from being kept.
+  event.waitUntil(
+    caches
+      .open(VERSION)
+      .then((c) => Promise.allSettled(CORE.map((u) => c.add(new Request(u, { cache: "reload" })))))
+      .then(async (results) => {
+        // the page itself is a must; without it, stay on the old version and try again later
+        const page = await caches.open(VERSION).then((c) => c.match("./index.html"));
+        if (!page) throw new Error("index.html not cached");
+        return results;
+      })
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -24,40 +33,61 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/** Network with a time limit: a weak or fake connection doesn't keep the app waiting. */
+function fetchWithin(req, ms, init) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("slow")), ms);
+    fetch(req, init).then(
+      (r) => {
+        clearTimeout(t);
+        resolve(r);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  // The app page: try the network for updates, fall back to the saved copy offline.
+  // The app page: the copy on the phone, right away. A new version arrives through a new
+  // sw.js (the browser checks it by itself), and shows the next time the app is opened.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req, { cache: "no-cache" })
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put("./index.html", copy));
-          return res;
-        })
-        .catch(() => caches.match("./index.html").then((r) => r || caches.match("./"))),
+      caches.open(VERSION).then(async (c) => {
+        const saved = (await c.match("./index.html")) || (await c.match("./"));
+        if (saved) return saved;
+        // first visit: from the network, and keep it
+        const res = await fetch(req, { cache: "no-cache" });
+        if (res.ok) c.put("./index.html", res.clone());
+        return res;
+      }),
     );
     return;
   }
 
-  // The app's name and icon list: newest from the network, saved copy offline.
+  // The app's name and icon list: saved copy first, refreshed in the background.
   if (url.origin === self.location.origin && url.pathname.endsWith("manifest.webmanifest")) {
     event.respondWith(
-      fetch(req, { cache: "no-cache" })
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put("./manifest.webmanifest", copy));
-          return res;
-        })
-        .catch(() => caches.match("./manifest.webmanifest")),
+      caches.match("./manifest.webmanifest").then((hit) => {
+        const fresh = fetchWithin(req, 4000, { cache: "no-cache" })
+          .then((res) => {
+            if (res.ok) caches.open(VERSION).then((c) => c.put("./manifest.webmanifest", res.clone()));
+            return res;
+          })
+          .catch(() => hit);
+        return hit || fresh;
+      }),
     );
     return;
   }
 
-  // Everything else (libraries, fonts, icons): saved copy first, then the network.
+  // Everything else (fonts, icons): saved copy first, then the network.
   const cacheable = url.origin === self.location.origin || /(^|\.)(jsdelivr\.net|googleapis\.com|gstatic\.com)$/.test(url.hostname);
   if (!cacheable) return;
   event.respondWith(
