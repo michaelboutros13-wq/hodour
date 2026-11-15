@@ -1,5 +1,5 @@
 /* Offline support: keeps the app on the phone after the first visit, so it opens with no internet. */
-const VERSION = "ssa-cloud-3a7f849c64";
+const VERSION = "ssa-cloud-e50763559e";
 const CORE = [
   "./",
   "./index.html",
@@ -50,10 +50,41 @@ function fetchWithin(req, ms, init) {
   });
 }
 
+/**
+ * «مشاركة» from another app (Files, WhatsApp, Drive…) straight into the app: Android posts
+ * the file here. It's kept for a moment, and the app opens on «إضافة أولاد من ملف» to read it.
+ * (Picking a file from inside the app can lose it: Android may close the app meanwhile.)
+ */
+const SHARED = "ssa-shared";
+async function receiveShare(req) {
+  try {
+    const form = await req.formData();
+    const files = form.getAll("file").filter((f) => f && typeof f !== "string" && f.size > 0);
+    const text = [form.get("title"), form.get("text")].filter((t) => typeof t === "string" && t.trim()).join("\n");
+    const cache = await caches.open(SHARED);
+    for (const k of await cache.keys()) await cache.delete(k);
+    let i = 0;
+    for (const f of files.slice(0, 10)) {
+      await cache.put(
+        `./shared/${i++}`,
+        new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "") } }),
+      );
+    }
+    if (!files.length && text) await cache.put("./shared/text", new Response(text, { headers: { "content-type": "text/plain;charset=utf-8" } }));
+  } catch (e) {
+    /* the app will say nothing arrived */
+  }
+  return Response.redirect("./#/children/import?shared=1", 303);
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.method !== "GET") return;
   const url = new URL(req.url);
+  if (req.method === "POST" && url.pathname.endsWith("/share-target")) {
+    event.respondWith(receiveShare(req));
+    return;
+  }
+  if (req.method !== "GET") return;
 
   // The app page: the copy on the phone, right away. A new version arrives through a new
   // sw.js (the browser checks it by itself), and shows the next time the app is opened.
