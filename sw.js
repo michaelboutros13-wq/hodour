@@ -1,5 +1,5 @@
 /* Offline support: keeps the app on the phone after the first visit, so it opens with no internet. */
-const VERSION = "ssa-cloud-5c1d1fcc6e";
+const VERSION = "ssa-cloud-2a2588e48a";
 const CORE = [
   "./",
   "./index.html",
